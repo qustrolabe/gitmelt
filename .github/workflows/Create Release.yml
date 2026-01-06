@@ -24,6 +24,9 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: gitmelt-macos
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: gitmelt-macos
 
     steps:
       - name: Checkout code
