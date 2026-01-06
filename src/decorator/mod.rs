@@ -50,6 +50,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn test_format_path_windows() {
         let path = PathBuf::from("src\\main.rs");
         assert_eq!(format_path(&path), "src/main.rs");
