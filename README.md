@@ -11,3 +11,10 @@ gitmelt -i '*.{rs,toml}'
 
 produces a `digest.txt` file in the current directory containing all the `.rs`
 and `.toml` files in the current directory and its subdirectories
+
+## Build
+
+```bash
+cargo build --relase
+cargo install --path .
+```
