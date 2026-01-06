@@ -23,10 +23,10 @@ jobs:
             artifact_name: gitmelt-windows.exe
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: gitmelt-macos
+            artifact_name: gitmelt-macos-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: gitmelt-macos
+            artifact_name: gitmelt-macos-aarch64
 
     steps:
       - name: Checkout code
