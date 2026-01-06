@@ -1,4 +1,4 @@
-use std::path::{Component, Path};
+use std::path::Path;
 
 pub mod default;
 pub mod file_tree;

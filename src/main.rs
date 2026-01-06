@@ -93,7 +93,7 @@ fn main() -> Result<()> {
         exclude: cli.exclude,
     };
 
-    info!("Traversing files in {:?}", options.root);
+    info!("Traversing files in {}", options.root.display());
     let files = traversal::traverse(&options)?;
 
     info!("Found {} files", files.len());

@@ -7,7 +7,7 @@ pub fn clone_repo(url: &str, branch: Option<&str>) -> Result<TempDir> {
     let temp_dir = TempDir::new()?;
     let target_path = temp_dir.path();
 
-    info!("Cloning {} into {:?}", url, target_path);
+    info!("Cloning {url} into {}", target_path.display());
 
     let mut cmd = Command::new("git");
     cmd.arg("clone").arg("--depth").arg("1");

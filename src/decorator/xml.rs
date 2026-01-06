@@ -6,7 +6,7 @@ pub struct XmlDecorator;
 impl ContentDecorator for XmlDecorator {
     fn before(&self, path: &Path) -> Option<String> {
         let path_str = format_path(path);
-        Some(format!("<file path=\"{}\">", path_str))
+        Some(format!("<file path=\"{path_str}\">"))
     }
 
     fn after(&self, _path: &Path) -> Option<String> {

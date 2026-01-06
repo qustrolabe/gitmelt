@@ -8,8 +8,7 @@ impl ContentDecorator for DefaultDecorator {
     fn before(&self, path: &Path) -> Option<String> {
         let path_str = format_path(path);
         Some(format!(
-            "================================================\nFILE: {}\n================================================\n",
-            path_str
+            "================================================\nFILE: {path_str}\n================================================\n"
         ))
     }
 

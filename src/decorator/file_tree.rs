@@ -1,5 +1,6 @@
 use super::{GlobalDecorator, format_path};
-use std::path::{Path, PathBuf};
+use std::fmt::Write;
+use std::path::PathBuf;
 
 /// A global decorator that prints a file tree
 pub struct FileTreeDecorator {
@@ -13,7 +14,7 @@ impl GlobalDecorator for FileTreeDecorator {
         for file in files {
             // Try to make path relative to root for cleaner output
             let display_path = file.strip_prefix(&self.root).unwrap_or(file);
-            output.push_str(&format!("- {}\n", format_path(display_path)));
+            let _ = writeln!(output, "- {}", format_path(display_path));
         }
         output.push('\n');
         Some(output)

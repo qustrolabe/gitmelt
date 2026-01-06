@@ -1,6 +1,5 @@
 use crate::decorator::{ContentDecorator, GlobalDecorator};
 use anyhow::Result;
-use content_inspector;
 use log::{error, info};
 use std::fs::File;
 use std::io::{self, Write};
@@ -23,7 +22,7 @@ pub fn ingest(
     global_decorator: Option<&dyn GlobalDecorator>,
 ) -> Result<()> {
     match &output_dest {
-        OutputDestination::File(path) => info!("Writing digest to {:?}", path),
+        OutputDestination::File(path) => info!("Writing digest to {}", path.display()),
         OutputDestination::Stdout => info!("Writing digest to stdout"),
     }
 
@@ -34,30 +33,36 @@ pub fn ingest(
 
     let mut total_tokens = 0;
 
-    if let Some(global) = global_decorator {
-        if let Some(prologue) = global.prologue(files) {
-            writeln!(writer, "{}", prologue)?;
-        }
+    if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
+        writeln!(writer, "{prologue}")?;
     }
 
     let bpe = cl100k_base().ok();
 
     for path in files {
         // 1. Check file size
-        if let Ok(metadata) = std::fs::metadata(path) {
-            if metadata.len() > MAX_FILE_SIZE {
-                error!("Skipping large file: {:?} ({} bytes)", path, metadata.len());
-                writeln!(writer, "----- {:?} (Skipped: >10MB) -----", path)?;
-                continue;
-            }
+        if let Ok(metadata) = std::fs::metadata(path)
+            && metadata.len() > MAX_FILE_SIZE
+        {
+            error!(
+                "Skipping large file: {} ({} bytes)",
+                path.display(),
+                metadata.len()
+            );
+            writeln!(writer, "----- {} (Skipped: >10MB) -----", path.display())?;
+            continue;
         }
 
         // 2. Check for binary content
         let mut file = match File::open(path) {
             Ok(f) => f,
             Err(e) => {
-                error!("Error opening {:?}: {}", path, e);
-                writeln!(writer, "----- {:?} (Error opening file) -----", path)?;
+                error!("Error opening {}: {e}", path.display());
+                writeln!(
+                    writer,
+                    "----- {} (Error opening file) -----",
+                    path.display()
+                )?;
                 continue;
             }
         };
@@ -69,42 +74,50 @@ pub fn ingest(
         let n = match std::io::Read::read(&mut file, &mut buffer) {
             Ok(n) => n,
             Err(e) => {
-                error!("Error reading prelude of {:?}: {}", path, e);
-                writeln!(writer, "----- {:?} (Error reading prelude) -----", path)?;
+                error!("Error reading prelude of {}: {e}", path.display());
+                writeln!(
+                    writer,
+                    "----- {} (Error reading prelude) -----",
+                    path.display()
+                )?;
                 continue;
             }
         };
 
         if n > 0 && content_inspector::inspect(&buffer[..n]).is_binary() {
-            log::warn!("Skipping binary file: {:?}", path);
-            writeln!(writer, "----- {:?} (Skipped: Binary) -----", path)?;
+            log::warn!("Skipping binary file: {}", path.display());
+            writeln!(writer, "----- {} (Skipped: Binary) -----", path.display())?;
             continue;
         }
 
         // Reset cursor to 0 to read full content
         // Note: `File` implements `Seek`
         if let Err(e) = std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(0)) {
-            error!("Error seeking {:?}: {}", path, e);
+            error!("Error seeking {}: {e}", path.display());
             continue;
         }
 
         // now read to string safely
         let mut content = String::new();
         if let Err(e) = std::io::Read::read_to_string(&mut file, &mut content) {
-            error!("Error reading {:?}: {}", path, e);
-            writeln!(writer, "----- {:?} (Error reading content) -----", path)?;
+            error!("Error reading {}: {e}", path.display());
+            writeln!(
+                writer,
+                "----- {} (Error reading content) -----",
+                path.display()
+            )?;
             continue;
         }
 
         if let Some(before) = content_decorator.before(path) {
-            writeln!(writer, "{}", before)?;
+            writeln!(writer, "{before}")?;
         }
 
         content = content_decorator.transform(path, content);
-        writeln!(writer, "{}", content)?;
+        writeln!(writer, "{content}")?;
 
         if let Some(after) = content_decorator.after(path) {
-            writeln!(writer, "{}", after)?;
+            writeln!(writer, "{after}")?;
         }
 
         // Count tokens
@@ -114,8 +127,8 @@ pub fn ingest(
         }
     }
 
-    info!("Total estimated tokens: {}", total_tokens);
-    println!("Total estimated tokens: {}", total_tokens);
+    info!("Total estimated tokens: {total_tokens}");
+    println!("Total estimated tokens: {total_tokens}");
 
     Ok(())
 }

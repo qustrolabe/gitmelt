@@ -12,40 +12,40 @@ pub struct TraversalOptions {
 pub fn traverse(options: &TraversalOptions) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
 
-    log::debug!("Traversing {:?}", options.root);
+    log::debug!("Traversing {}", options.root.display());
 
     // 1. Setup exclusions
     // MATCH BEHAVIOR: OverrideBuilder::add("pattern") creates a Whitelist rule.
     // So if a file matches "pattern", result is Whitelist.
     // If it doesn't match, result is Ignore (Unmatched).
-    let exclude_matcher = if !options.exclude.is_empty() {
+    let exclude_matcher = if options.exclude.is_empty() {
+        None
+    } else {
         let mut builder = OverrideBuilder::new(&options.root);
         for pattern in &options.exclude {
             builder.add(pattern)?;
         }
         Some(builder.build()?)
-    } else {
-        None
     };
 
     let mut walker = WalkBuilder::new(&options.root);
     walker.git_ignore(true); // We handle custom overrides manually below
 
     // 2. Setup inclusions
-    let include_matcher = if !options.include.is_empty() {
+    let include_matcher = if options.include.is_empty() {
+        None
+    } else {
         let mut builder = OverrideBuilder::new(&options.root);
         for pattern in &options.include {
             builder.add(pattern)?;
         }
         Some(builder.build()?)
-    } else {
-        None
     };
 
     for result in walker.build() {
         match result {
             Ok(entry) => {
-                if !entry.file_type().map_or(false, |ft| ft.is_file()) {
+                if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                     continue;
                 }
 
@@ -53,7 +53,11 @@ pub fn traverse(options: &TraversalOptions) -> Result<Vec<PathBuf>> {
                 // OverrideBuilder expects relative paths from the root it was built with.
                 let relative_path = path.strip_prefix(&options.root).unwrap_or(path);
 
-                log::trace!("Checking {:?} (rel: {:?})", path, relative_path);
+                log::trace!(
+                    "Checking {} (rel: {})",
+                    path.display(),
+                    relative_path.display()
+                );
 
                 // Exclude check
                 if let Some(matcher) = &exclude_matcher {
@@ -61,7 +65,7 @@ pub fn traverse(options: &TraversalOptions) -> Result<Vec<PathBuf>> {
                     // If matched (Whitelist), it means it matched an exclude pattern.
                     // So we should SKIP it.
                     if res.is_whitelist() {
-                        log::debug!("Excluded file {:?} (pattern match)", relative_path);
+                        log::debug!("Excluded file {} (pattern match)", relative_path.display());
                         continue;
                     }
                 }
@@ -72,14 +76,14 @@ pub fn traverse(options: &TraversalOptions) -> Result<Vec<PathBuf>> {
                     // If matched (Whitelist), it means it matched an include pattern.
                     // If NOT matched (Ignore), we should SKIP it.
                     if !res.is_whitelist() {
-                        log::debug!("Skipped file {:?} (not included)", relative_path);
+                        log::debug!("Skipped file {} (not included)", relative_path.display());
                         continue;
                     }
                 }
 
                 files.push(path.to_path_buf());
             }
-            Err(err) => log::error!("Traversal error: {}", err),
+            Err(err) => log::error!("Traversal error: {err}"),
         }
     }
 
