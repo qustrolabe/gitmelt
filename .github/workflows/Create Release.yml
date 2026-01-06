@@ -12,8 +12,6 @@ jobs:
   build-and-upload:
     name: Build and Upload
     runs-on: ${{ matrix.os }}
-    env:
-      OPENSSL_STATIC: 1
     strategy:
       matrix:
         include:
