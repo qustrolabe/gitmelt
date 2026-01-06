@@ -292,22 +292,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "git-melt"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "content_inspector",
- "env_logger",
- "git2",
- "glob",
- "ignore",
- "log",
- "tempfile",
- "tiktoken-rs",
-]
-
-[[package]]
 name = "git2"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -320,6 +304,22 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "url",
+]
+
+[[package]]
+name = "gitmelt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "content_inspector",
+ "env_logger",
+ "git2",
+ "glob",
+ "ignore",
+ "log",
+ "tempfile",
+ "tiktoken-rs",
 ]
 
 [[package]]

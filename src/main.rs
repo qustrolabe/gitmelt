@@ -20,7 +20,7 @@ enum Preset {
 }
 
 #[derive(Parser)]
-#[command(name = "git-melt")]
+#[command(name = "gitmelt")]
 #[command(about = "Concatenates file contents into a single digest file", long_about = None)]
 struct Cli {
     /// Path to traverse or Git URL

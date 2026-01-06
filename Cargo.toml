@@ -1,7 +1,9 @@
 [package]
-name = "git-melt"
+name = "gitmelt"
 version = "0.1.0"
 edition = "2024"
+authors = ["qustrolabe <qustrolabe@gmail.com>"]
+keywords = ["git", "llm", "digest", "context"]
 
 [dependencies]
 anyhow = "1.0.100"
