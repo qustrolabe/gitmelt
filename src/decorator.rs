@@ -36,6 +36,22 @@ impl ContentDecorator for DefaultDecorator {
     }
 }
 
+pub struct XmlDecorator;
+
+impl ContentDecorator for XmlDecorator {
+    fn before(&self, _path: &Path) -> Option<String> {
+        None
+    }
+
+    fn after(&self, _path: &Path) -> Option<String> {
+        None
+    }
+
+    fn transform(&self, path: &Path, content: String) -> String {
+        format!("<file path=\"{}\">\n{}\n</file>", path.display(), content)
+    }
+}
+
 /// A global decorator that prints a file tree
 pub struct FileTreeDecorator {
     pub root: std::path::PathBuf,

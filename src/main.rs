@@ -1,3 +1,4 @@
+mod cloner;
 mod decorator;
 mod ingest;
 mod traversal;
@@ -9,16 +10,26 @@ use std::env;
 use std::path::PathBuf;
 use traversal::TraversalOptions;
 
-use crate::decorator::{DefaultDecorator, FileTreeDecorator};
+use crate::decorator::{ContentDecorator, DefaultDecorator, FileTreeDecorator, XmlDecorator};
 use crate::ingest::OutputDestination;
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum Preset {
+    Default,
+    Xml,
+}
 
 #[derive(Parser)]
 #[command(name = "git-melt")]
 #[command(about = "Concatenates file contents into a single digest file", long_about = None)]
 struct Cli {
-    /// Path to traverse
+    /// Path to traverse or Git URL
     #[arg(default_value = ".")]
-    path: PathBuf,
+    input: String,
+
+    /// Git branch to clone (if input is a git URL)
+    #[arg(long)]
+    branch: Option<String>,
 
     /// Include patterns (glob)
     #[arg(short, long)]
@@ -39,6 +50,10 @@ struct Cli {
     /// Verbose logging (info level). Default is error only.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Output preset
+    #[arg(long, value_enum, default_value_t = Preset::Default)]
+    preset: Preset,
 }
 
 fn init_logger(verbose: bool) {
@@ -46,7 +61,7 @@ fn init_logger(verbose: bool) {
 
     // Default to error level, unless verbose is set
     let level = if verbose {
-        LevelFilter::Info
+        LevelFilter::Debug
     } else {
         LevelFilter::Error
     };
@@ -60,8 +75,20 @@ fn main() -> Result<()> {
 
     init_logger(cli.verbose);
 
+    let temp_dir_handle = if cli.input.starts_with("http") || cli.input.starts_with("git@") {
+        Some(cloner::clone_repo(&cli.input, cli.branch.as_deref())?)
+    } else {
+        None
+    };
+
+    let root_path = if let Some(ref temp) = temp_dir_handle {
+        temp.path().to_path_buf()
+    } else {
+        PathBuf::from(&cli.input)
+    };
+
     let options = TraversalOptions {
-        root: cli.path.clone(),
+        root: root_path.clone(),
         include: cli.include,
         exclude: cli.exclude,
     };
@@ -86,7 +113,11 @@ fn main() -> Result<()> {
         OutputDestination::File(path)
     };
 
-    let content_decorator = DefaultDecorator;
+    let content_decorator: Box<dyn ContentDecorator> = match cli.preset {
+        Preset::Default => Box::new(DefaultDecorator),
+        Preset::Xml => Box::new(XmlDecorator),
+    };
+
     let global_decorator = FileTreeDecorator {
         root: options.root.clone(),
     };
@@ -94,7 +125,7 @@ fn main() -> Result<()> {
     ingest::ingest(
         &files,
         output_dest,
-        &content_decorator,
+        content_decorator.as_ref(),
         Some(&global_decorator),
     )?;
 
