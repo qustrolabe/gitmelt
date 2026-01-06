@@ -4,16 +4,37 @@ use std::path::Path;
 pub struct XmlDecorator;
 
 impl ContentDecorator for XmlDecorator {
-    fn before(&self, _path: &Path) -> Option<String> {
-        None
+    fn before(&self, path: &Path) -> Option<String> {
+        let path_str = format_path(path);
+        Some(format!("<file path=\"{}\">", path_str))
     }
 
     fn after(&self, _path: &Path) -> Option<String> {
-        None
+        Some("</file>".to_string())
     }
 
-    fn transform(&self, path: &Path, content: String) -> String {
-        let path_str = format_path(path);
-        format!("<file path=\"{}\">\n{}\n</file>", path_str, content)
+    fn transform(&self, _path: &Path, content: String) -> String {
+        content
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_xml_decorator() {
+        let decorator = XmlDecorator;
+        let path = PathBuf::from("src/main.rs");
+        let content = "println!(\"hello\");".to_string();
+
+        let before = decorator.before(&path).unwrap();
+        let after = decorator.after(&path).unwrap();
+        let transformed = decorator.transform(&path, content.clone());
+
+        assert_eq!(before, "<file path=\"src/main.rs\">");
+        assert_eq!(after, "</file>");
+        assert_eq!(transformed, content);
     }
 }
