@@ -54,6 +54,14 @@ struct Cli {
     /// Output preset
     #[arg(long, value_enum, default_value_t = Preset::Default)]
     preset: Preset,
+
+    /// Prologue mode (tree, list, off)
+    #[arg(long, value_enum, default_value_t = crate::decorator::PrologueMode::List)]
+    prologue: crate::decorator::PrologueMode,
+
+    /// Dry run (only token estimation)
+    #[arg(long)]
+    dry: bool,
 }
 
 fn init_logger(verbose: bool) {
@@ -104,7 +112,9 @@ fn main() -> Result<()> {
 
     info!("Generating digest...");
 
-    let output_dest = if cli.stdout {
+    let output_dest = if cli.dry {
+        OutputDestination::Null
+    } else if cli.stdout {
         OutputDestination::Stdout
     } else {
         let path = cli
@@ -120,6 +130,7 @@ fn main() -> Result<()> {
 
     let global_decorator = FileTreeDecorator {
         root: options.root.clone(),
+        mode: cli.prologue,
     };
 
     ingest::ingest(

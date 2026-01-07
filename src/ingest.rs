@@ -12,6 +12,7 @@ pub const DIGEST_FILENAME: &str = "digest.txt";
 pub enum OutputDestination {
     File(PathBuf),
     Stdout,
+    Null,
 }
 
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
@@ -30,6 +31,7 @@ pub fn ingest(
     match &output_dest {
         OutputDestination::File(path) => info!("Writing digest to {}", path.display()),
         OutputDestination::Stdout => info!("Writing digest to stdout"),
+        OutputDestination::Null => info!("Dry run: only token estimation will be performed"),
     }
 
     // Pre-load tokenizer
@@ -41,20 +43,25 @@ pub fn ingest(
         .filter_map(|path| process_single_file(path, content_decorator, tokenizer.as_ref()))
         .collect();
 
-    let mut writer: Box<dyn Write> = match output_dest {
-        OutputDestination::File(path) => Box::new(File::create(path)?),
-        OutputDestination::Stdout => Box::new(io::stdout()),
+    let mut writer: Option<Box<dyn Write>> = match output_dest {
+        OutputDestination::File(path) => Some(Box::new(File::create(path)?)),
+        OutputDestination::Stdout => Some(Box::new(io::stdout())),
+        OutputDestination::Null => None,
     };
 
     let mut total_tokens = 0;
 
     if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
-        writeln!(writer, "{prologue}")?;
+        if let Some(ref mut w) = writer {
+            writeln!(w, "{prologue}")?;
+        }
     }
 
     // Write results sequentially to maintain order (files was sorted in traversal)
     for processed in processed_results {
-        writeln!(writer, "{}", processed.content)?;
+        if let Some(ref mut w) = writer {
+            writeln!(w, "{}", processed.content)?;
+        }
         total_tokens += processed.tokens;
     }
 

@@ -8,6 +8,14 @@ pub use default::DefaultDecorator;
 pub use file_tree::FileTreeDecorator;
 pub use xml::XmlDecorator;
 
+#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]
+pub enum PrologueMode {
+    #[default]
+    List,
+    Tree,
+    Off,
+}
+
 /// Trait for decorating individual file content
 pub trait ContentDecorator: Sync {
     /// Initial text to appear before the file content
