@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
+use rayon::prelude::*;
 use std::path::PathBuf;
 
 pub struct TraversalOptions {
@@ -10,8 +11,6 @@ pub struct TraversalOptions {
 }
 
 pub fn traverse(options: &TraversalOptions) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-
     log::debug!("Traversing {}", options.root.display());
 
     // 1. Setup exclusions
@@ -42,50 +41,63 @@ pub fn traverse(options: &TraversalOptions) -> Result<Vec<PathBuf>> {
         Some(builder.build()?)
     };
 
-    for result in walker.build() {
-        match result {
-            Ok(entry) => {
-                if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                    continue;
-                }
-
-                let path = entry.path();
-                // OverrideBuilder expects relative paths from the root it was built with.
-                let relative_path = path.strip_prefix(&options.root).unwrap_or(path);
-
-                log::trace!(
-                    "Checking {} (rel: {})",
-                    path.display(),
-                    relative_path.display()
-                );
-
-                // Exclude check
-                if let Some(matcher) = &exclude_matcher {
-                    let res = matcher.matched(relative_path, false);
-                    // If matched (Whitelist), it means it matched an exclude pattern.
-                    // So we should SKIP it.
-                    if res.is_whitelist() {
-                        log::debug!("Excluded file {} (pattern match)", relative_path.display());
-                        continue;
+    let files: Vec<PathBuf> = walker
+        .build()
+        .par_bridge()
+        .filter_map(|result| {
+            match result {
+                Ok(entry) => {
+                    if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                        return None;
                     }
-                }
 
-                // Include check
-                if let Some(matcher) = &include_matcher {
-                    let res = matcher.matched(relative_path, false);
-                    // If matched (Whitelist), it means it matched an include pattern.
-                    // If NOT matched (Ignore), we should SKIP it.
-                    if !res.is_whitelist() {
-                        log::debug!("Skipped file {} (not included)", relative_path.display());
-                        continue;
+                    let path = entry.path();
+                    // OverrideBuilder expects relative paths from the root it was built with.
+                    let relative_path = path.strip_prefix(&options.root).unwrap_or(path);
+
+                    log::trace!(
+                        "Checking {} (rel: {})",
+                        path.display(),
+                        relative_path.display()
+                    );
+
+                    // Exclude check
+                    if let Some(matcher) = &exclude_matcher {
+                        let res = matcher.matched(relative_path, false);
+                        // If matched (Whitelist), it means it matched an exclude pattern.
+                        // So we should SKIP it.
+                        if res.is_whitelist() {
+                            log::debug!(
+                                "Excluded file {} (pattern match)",
+                                relative_path.display()
+                            );
+                            return None;
+                        }
                     }
-                }
 
-                files.push(path.to_path_buf());
+                    // Include check
+                    if let Some(matcher) = &include_matcher {
+                        let res = matcher.matched(relative_path, false);
+                        // If matched (Whitelist), it means it matched an include pattern.
+                        // If NOT matched (Ignore), we should SKIP it.
+                        if !res.is_whitelist() {
+                            log::debug!("Skipped file {} (not included)", relative_path.display());
+                            return None;
+                        }
+                    }
+
+                    Some(path.to_path_buf())
+                }
+                Err(err) => {
+                    log::error!("Traversal error: {err}");
+                    None
+                }
             }
-            Err(err) => log::error!("Traversal error: {err}"),
-        }
-    }
+        })
+        .collect();
+
+    let mut files = files;
+    files.sort();
 
     Ok(files)
 }

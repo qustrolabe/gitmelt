@@ -9,7 +9,7 @@ pub use file_tree::FileTreeDecorator;
 pub use xml::XmlDecorator;
 
 /// Trait for decorating individual file content
-pub trait ContentDecorator {
+pub trait ContentDecorator: Sync {
     /// Initial text to appear before the file content
     fn before(&self, path: &Path) -> Option<String>;
 
@@ -21,7 +21,7 @@ pub trait ContentDecorator {
 }
 
 /// Trait for global decorations on the digest (e.g. at the very start)
-pub trait GlobalDecorator {
+pub trait GlobalDecorator: Sync {
     /// Text to appear at the very beginning of the digest
     fn prologue(&self, files: &[std::path::PathBuf]) -> Option<String>;
 }

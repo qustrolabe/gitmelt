@@ -1,10 +1,11 @@
 use crate::decorator::{ContentDecorator, GlobalDecorator};
 use anyhow::Result;
-use log::{error, info};
+use log::{error, info, warn};
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use tiktoken_rs::cl100k_base;
+use tiktoken_rs::{CoreBPE, cl100k_base};
 
 pub const DIGEST_FILENAME: &str = "digest.txt";
 
@@ -14,6 +15,11 @@ pub enum OutputDestination {
 }
 
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+
+struct ProcessedFile {
+    content: String,
+    tokens: usize,
+}
 
 pub fn ingest(
     files: &[PathBuf],
@@ -26,6 +32,15 @@ pub fn ingest(
         OutputDestination::Stdout => info!("Writing digest to stdout"),
     }
 
+    // Pre-load tokenizer
+    let tokenizer = cl100k_base().ok();
+
+    // Process files in parallel
+    let processed_results: Vec<ProcessedFile> = files
+        .par_iter()
+        .filter_map(|path| process_single_file(path, content_decorator, tokenizer.as_ref()))
+        .collect();
+
     let mut writer: Box<dyn Write> = match output_dest {
         OutputDestination::File(path) => Box::new(File::create(path)?),
         OutputDestination::Stdout => Box::new(io::stdout()),
@@ -37,100 +52,114 @@ pub fn ingest(
         writeln!(writer, "{prologue}")?;
     }
 
-    let bpe = cl100k_base().ok();
-
-    for path in files {
-        // 1. Check file size
-        if let Ok(metadata) = std::fs::metadata(path)
-            && metadata.len() > MAX_FILE_SIZE
-        {
-            error!(
-                "Skipping large file: {} ({} bytes)",
-                path.display(),
-                metadata.len()
-            );
-            writeln!(writer, "----- {} (Skipped: >10MB) -----", path.display())?;
-            continue;
-        }
-
-        // 2. Check for binary content
-        let mut file = match File::open(path) {
-            Ok(f) => f,
-            Err(e) => {
-                error!("Error opening {}: {e}", path.display());
-                writeln!(
-                    writer,
-                    "----- {} (Error opening file) -----",
-                    path.display()
-                )?;
-                continue;
-            }
-        };
-
-        // Read first chunk (up to 1KB) to check for binary
-        // We use a small buffer. If file is small, this reads it all.
-        // We want to verify it's text before strictly reading everything into a string.
-        let mut buffer = [0u8; 1024];
-        let n = match std::io::Read::read(&mut file, &mut buffer) {
-            Ok(n) => n,
-            Err(e) => {
-                error!("Error reading prelude of {}: {e}", path.display());
-                writeln!(
-                    writer,
-                    "----- {} (Error reading prelude) -----",
-                    path.display()
-                )?;
-                continue;
-            }
-        };
-
-        if n > 0 && content_inspector::inspect(&buffer[..n]).is_binary() {
-            log::warn!("Skipping binary file: {}", path.display());
-            writeln!(writer, "----- {} (Skipped: Binary) -----", path.display())?;
-            continue;
-        }
-
-        // Reset cursor to 0 to read full content
-        // Note: `File` implements `Seek`
-        if let Err(e) = std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(0)) {
-            error!("Error seeking {}: {e}", path.display());
-            continue;
-        }
-
-        // now read to string safely
-        let mut content = String::new();
-        if let Err(e) = std::io::Read::read_to_string(&mut file, &mut content) {
-            error!("Error reading {}: {e}", path.display());
-            writeln!(
-                writer,
-                "----- {} (Error reading content) -----",
-                path.display()
-            )?;
-            continue;
-        }
-
-        if let Some(before) = content_decorator.before(path) {
-            writeln!(writer, "{before}")?;
-        }
-
-        content = content_decorator.transform(path, content);
-        writeln!(writer, "{content}")?;
-
-        if let Some(after) = content_decorator.after(path) {
-            writeln!(writer, "{after}")?;
-        }
-
-        // Count tokens
-        if let Some(ref tokenizer) = bpe {
-            let tokens = tokenizer.encode_with_special_tokens(&content);
-            total_tokens += tokens.len();
-        }
+    // Write results sequentially to maintain order (files was sorted in traversal)
+    for processed in processed_results {
+        writeln!(writer, "{}", processed.content)?;
+        total_tokens += processed.tokens;
     }
 
     info!("Total estimated tokens: {total_tokens}");
     println!("Total estimated tokens: {total_tokens}");
 
     Ok(())
+}
+
+fn process_single_file(
+    path: &PathBuf,
+    content_decorator: &dyn ContentDecorator,
+    tokenizer: Option<&CoreBPE>,
+) -> Option<ProcessedFile> {
+    // 1. Check file size
+    if let Ok(metadata) = std::fs::metadata(path) {
+        if metadata.len() > MAX_FILE_SIZE {
+            error!(
+                "Skipping large file: {} ({} bytes)",
+                path.display(),
+                metadata.len()
+            );
+            return Some(ProcessedFile {
+                content: format!("----- {} (Skipped: >10MB) -----", path.display()),
+                tokens: 0,
+            });
+        }
+    }
+
+    // 2. Check for binary content & Read
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Error opening {}: {e}", path.display());
+            return Some(ProcessedFile {
+                content: format!("----- {} (Error opening file) -----", path.display()),
+                tokens: 0,
+            });
+        }
+    };
+
+    let mut buffer = [0u8; 1024];
+    let n = match std::io::Read::read(&mut file, &mut buffer) {
+        Ok(n) => n,
+        Err(e) => {
+            error!("Error reading prelude of {}: {e}", path.display());
+            return Some(ProcessedFile {
+                content: format!("----- {} (Error reading prelude) -----", path.display()),
+                tokens: 0,
+            });
+        }
+    };
+
+    if n > 0 && content_inspector::inspect(&buffer[..n]).is_binary() {
+        warn!("Skipping binary file: {}", path.display());
+        return Some(ProcessedFile {
+            content: format!("----- {} (Skipped: Binary) -----", path.display()),
+            tokens: 0,
+        });
+    }
+
+    // Reset cursor
+    if let Err(e) = std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(0)) {
+        error!("Error seeking {}: {e}", path.display());
+        return None;
+    }
+
+    let mut content = String::new();
+    if let Err(e) = std::io::Read::read_to_string(&mut file, &mut content) {
+        error!("Error reading {}: {e}", path.display());
+        return Some(ProcessedFile {
+            content: format!("----- {} (Error reading content) -----", path.display()),
+            tokens: 0,
+        });
+    }
+
+    // Apply decoration
+    let mut final_output = String::new();
+    if let Some(before) = content_decorator.before(path) {
+        final_output.push_str(&before);
+        final_output.push('\n');
+    }
+
+    let transformed_content = content_decorator.transform(path, content);
+    final_output.push_str(&transformed_content);
+    final_output.push('\n');
+
+    if let Some(after) = content_decorator.after(path) {
+        final_output.push_str(&after);
+        final_output.push('\n');
+    }
+
+    // Count tokens
+    let tokens = if let Some(tokenizer) = tokenizer {
+        tokenizer
+            .encode_with_special_tokens(&transformed_content)
+            .len()
+    } else {
+        0
+    };
+
+    Some(ProcessedFile {
+        content: final_output.trim_end().to_string(),
+        tokens,
+    })
 }
 
 #[cfg(test)]
