@@ -1,9 +1,11 @@
 use crate::decorator::{ContentDecorator, GlobalDecorator};
 use anyhow::Result;
+use crossbeam_channel::bounded;
 use log::{error, info, warn};
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use tiktoken_rs::{CoreBPE, cl100k_base};
 
@@ -17,7 +19,12 @@ pub enum OutputDestination {
 
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
 
+pub struct IngestMetrics {
+    pub total_tokens: usize,
+}
+
 struct ProcessedFile {
+    index: usize,
     content: String,
     tokens: usize,
 }
@@ -27,7 +34,7 @@ pub fn ingest(
     output_dest: OutputDestination,
     content_decorator: &dyn ContentDecorator,
     global_decorator: Option<&dyn GlobalDecorator>,
-) -> Result<()> {
+) -> Result<Option<IngestMetrics>> {
     match &output_dest {
         OutputDestination::File(path) => info!("Writing digest to {}", path.display()),
         OutputDestination::Stdout => info!("Writing digest to stdout"),
@@ -37,41 +44,88 @@ pub fn ingest(
     // Pre-load tokenizer
     let tokenizer = cl100k_base().ok();
 
-    // Process files in parallel
-    let processed_results: Vec<ProcessedFile> = files
-        .par_iter()
-        .filter_map(|path| process_single_file(path, content_decorator, tokenizer.as_ref()))
-        .collect();
+    let (tx, rx) = bounded(32); // Buffer some results to keep cores busy
 
-    let mut writer: Option<Box<dyn Write>> = match output_dest {
-        OutputDestination::File(path) => Some(Box::new(File::create(path)?)),
-        OutputDestination::Stdout => Some(Box::new(io::stdout())),
-        OutputDestination::Null => None,
-    };
+    let metrics = crossbeam::scope(|scope| -> Result<IngestMetrics> {
+        // Spawn writer thread
+        let rx = rx; // Move rx into the scope, but it's shared
+        let writer_handle = scope.spawn(move |_| -> Result<usize> {
+            let mut writer: Option<Box<dyn Write>> = match output_dest {
+                OutputDestination::File(path) => {
+                    Some(Box::new(BufWriter::new(File::create(path)?)))
+                }
+                OutputDestination::Stdout => Some(Box::new(io::stdout())),
+                OutputDestination::Null => None,
+            };
 
-    let mut total_tokens = 0;
+            let mut total_tokens = 0;
+            let mut pending = BTreeMap::new();
+            let mut next_index = 0;
 
-    if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
-        if let Some(ref mut w) = writer {
-            writeln!(w, "{prologue}")?;
-        }
-    }
+            if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
+                if let Some(ref mut w) = writer {
+                    writeln!(w, "{prologue}")?;
+                }
+            }
 
-    // Write results sequentially to maintain order (files was sorted in traversal)
-    for processed in processed_results {
-        if let Some(ref mut w) = writer {
-            writeln!(w, "{}", processed.content)?;
-        }
-        total_tokens += processed.tokens;
-    }
+            while next_index < files.len() {
+                // Check if we already have the next segment
+                while let Some(processed) = pending.remove(&next_index) {
+                    let processed: ProcessedFile = processed;
+                    if let Some(ref mut w) = writer {
+                        writeln!(w, "{}", processed.content)?;
+                    }
+                    total_tokens += processed.tokens;
+                    next_index += 1;
+                }
 
-    info!("Total estimated tokens: {total_tokens}");
-    println!("Total estimated tokens: {total_tokens}");
+                if next_index >= files.len() {
+                    break;
+                }
 
-    Ok(())
+                // Wait for more results
+                if let Ok(processed) = rx.recv() {
+                    let processed: ProcessedFile = processed;
+                    pending.insert(processed.index, processed);
+                } else {
+                    break; // Channel closed
+                }
+            }
+
+            if let Some(ref mut w) = writer {
+                w.flush()?;
+            }
+
+            Ok(total_tokens)
+        });
+
+        // Process files in parallel
+        files.par_iter().enumerate().for_each(|(idx, path)| {
+            if let Some(processed) =
+                process_single_file(idx, path, content_decorator, tokenizer.as_ref())
+            {
+                let _ = tx.send(processed);
+            }
+        });
+
+        drop(tx); // Signal completion
+
+        let total_tokens = writer_handle
+            .join()
+            .map_err(|_| anyhow::anyhow!("Writer thread panicked"))??;
+
+        Ok(IngestMetrics { total_tokens })
+    })
+    .map_err(|e| anyhow::anyhow!("Scope error: {:?}", e))??;
+
+    info!("Total estimated tokens: {}", metrics.total_tokens);
+    println!("Total estimated tokens: {}", metrics.total_tokens);
+
+    Ok(Some(metrics))
 }
 
 fn process_single_file(
+    index: usize,
     path: &PathBuf,
     content_decorator: &dyn ContentDecorator,
     tokenizer: Option<&CoreBPE>,
@@ -85,6 +139,7 @@ fn process_single_file(
                 metadata.len()
             );
             return Some(ProcessedFile {
+                index,
                 content: format!("----- {} (Skipped: >10MB) -----", path.display()),
                 tokens: 0,
             });
@@ -97,27 +152,30 @@ fn process_single_file(
         Err(e) => {
             error!("Error opening {}: {e}", path.display());
             return Some(ProcessedFile {
+                index,
                 content: format!("----- {} (Error opening file) -----", path.display()),
                 tokens: 0,
             });
         }
     };
 
-    let mut buffer = [0u8; 1024];
-    let n = match std::io::Read::read(&mut file, &mut buffer) {
+    let mut prelude_buffer = [0u8; 1024];
+    let n = match std::io::Read::read(&mut file, &mut prelude_buffer) {
         Ok(n) => n,
         Err(e) => {
             error!("Error reading prelude of {}: {e}", path.display());
             return Some(ProcessedFile {
+                index,
                 content: format!("----- {} (Error reading prelude) -----", path.display()),
                 tokens: 0,
             });
         }
     };
 
-    if n > 0 && content_inspector::inspect(&buffer[..n]).is_binary() {
+    if n > 0 && content_inspector::inspect(&prelude_buffer[..n]).is_binary() {
         warn!("Skipping binary file: {}", path.display());
         return Some(ProcessedFile {
+            index,
             content: format!("----- {} (Skipped: Binary) -----", path.display()),
             tokens: 0,
         });
@@ -133,6 +191,7 @@ fn process_single_file(
     if let Err(e) = std::io::Read::read_to_string(&mut file, &mut content) {
         error!("Error reading {}: {e}", path.display());
         return Some(ProcessedFile {
+            index,
             content: format!("----- {} (Error reading content) -----", path.display()),
             tokens: 0,
         });
@@ -164,6 +223,7 @@ fn process_single_file(
     };
 
     Some(ProcessedFile {
+        index,
         content: final_output.trim_end().to_string(),
         tokens,
     })

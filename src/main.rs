@@ -8,6 +8,7 @@ use clap::Parser;
 use log::{LevelFilter, info};
 use std::env;
 use std::path::PathBuf;
+use std::time::Instant;
 use traversal::TraversalOptions;
 
 use crate::decorator::{ContentDecorator, DefaultDecorator, FileTreeDecorator, XmlDecorator};
@@ -62,6 +63,10 @@ struct Cli {
     /// Dry run (only token estimation)
     #[arg(long)]
     dry: bool,
+
+    /// Show detailed timing information
+    #[arg(short, long)]
+    timing: bool,
 }
 
 fn init_logger(verbose: bool) {
@@ -79,6 +84,7 @@ fn init_logger(verbose: bool) {
 }
 
 fn main() -> Result<()> {
+    let global_start = Instant::now();
     let cli = Cli::parse();
 
     init_logger(cli.verbose);
@@ -102,7 +108,9 @@ fn main() -> Result<()> {
     };
 
     info!("Traversing files in {}", options.root.display());
+    let discovery_start = Instant::now();
     let files = traversal::traverse(&options)?;
+    let discovery_duration = discovery_start.elapsed();
 
     info!("Found {} files", files.len());
     if files.is_empty() {
@@ -133,14 +141,25 @@ fn main() -> Result<()> {
         mode: cli.prologue,
     };
 
-    ingest::ingest(
+    let ingest_start = Instant::now();
+    let _ingest_metrics = ingest::ingest(
         &files,
         output_dest,
         content_decorator.as_ref(),
         Some(&global_decorator),
     )?;
+    let ingest_duration = ingest_start.elapsed();
 
     info!("Done!");
+
+    if cli.timing {
+        println!("\nTiming Summary:");
+        println!("----------------------------------------");
+        println!("Discovery:      {:?}", discovery_duration);
+        println!("Ingestion:      {:?}", ingest_duration);
+        println!("Total Runtime:  {:?}", global_start.elapsed());
+        println!("----------------------------------------");
+    }
 
     Ok(())
 }
