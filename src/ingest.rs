@@ -26,7 +26,6 @@ pub struct IngestMetrics {
 struct ProcessedFile {
     index: usize,
     content: String,
-    tokens: usize,
 }
 
 pub fn ingest(
@@ -34,6 +33,7 @@ pub fn ingest(
     output_dest: OutputDestination,
     content_decorator: &dyn ContentDecorator,
     global_decorator: Option<&dyn GlobalDecorator>,
+    count_tokens: bool,
 ) -> Result<Option<IngestMetrics>> {
     match &output_dest {
         OutputDestination::File(path) => info!("Writing digest to {}", path.display()),
@@ -41,8 +41,12 @@ pub fn ingest(
         OutputDestination::Null => info!("Dry run: only token estimation will be performed"),
     }
 
-    // Pre-load tokenizer
-    let tokenizer = cl100k_base().ok();
+    // Pre-load tokenizer if needed
+    let tokenizer = if count_tokens {
+        cl100k_base().ok()
+    } else {
+        None
+    };
 
     let (tx, rx) = bounded(32); // Buffer some results to keep cores busy
 
@@ -51,31 +55,28 @@ pub fn ingest(
         let rx = rx; // Move rx into the scope, but it's shared
         let writer_handle = scope.spawn(move |_| -> Result<usize> {
             let mut writer: Option<Box<dyn Write>> = match output_dest {
-                OutputDestination::File(path) => {
+                OutputDestination::File(ref path) => {
                     Some(Box::new(BufWriter::new(File::create(path)?)))
                 }
                 OutputDestination::Stdout => Some(Box::new(io::stdout())),
                 OutputDestination::Null => None,
             };
 
-            let mut total_tokens = 0;
+            let mut full_content = String::new();
             let mut pending = BTreeMap::new();
             let mut next_index = 0;
 
             if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
-                if let Some(ref mut w) = writer {
-                    writeln!(w, "{prologue}")?;
-                }
+                full_content.push_str(&prologue);
+                full_content.push('\n');
             }
 
             while next_index < files.len() {
                 // Check if we already have the next segment
                 while let Some(processed) = pending.remove(&next_index) {
                     let processed: ProcessedFile = processed;
-                    if let Some(ref mut w) = writer {
-                        writeln!(w, "{}", processed.content)?;
-                    }
-                    total_tokens += processed.tokens;
+                    full_content.push_str(&processed.content);
+                    full_content.push('\n');
                     next_index += 1;
                 }
 
@@ -92,7 +93,17 @@ pub fn ingest(
                 }
             }
 
+            // Trim the last newline if we have content
+            let final_output = full_content.trim_end();
+
+            let total_tokens = if let Some(t) = tokenizer {
+                t.encode_with_special_tokens(final_output).len()
+            } else {
+                0
+            };
+
             if let Some(ref mut w) = writer {
+                writeln!(w, "{}", final_output)?;
                 w.flush()?;
             }
 
@@ -101,9 +112,7 @@ pub fn ingest(
 
         // Process files in parallel
         files.par_iter().enumerate().for_each(|(idx, path)| {
-            if let Some(processed) =
-                process_single_file(idx, path, content_decorator, tokenizer.as_ref())
-            {
+            if let Some(processed) = process_single_file(idx, path, content_decorator) {
                 let _ = tx.send(processed);
             }
         });
@@ -128,7 +137,6 @@ fn process_single_file(
     index: usize,
     path: &PathBuf,
     content_decorator: &dyn ContentDecorator,
-    tokenizer: Option<&CoreBPE>,
 ) -> Option<ProcessedFile> {
     // 1. Check file size
     if let Ok(metadata) = std::fs::metadata(path) {
@@ -141,7 +149,6 @@ fn process_single_file(
             return Some(ProcessedFile {
                 index,
                 content: format!("----- {} (Skipped: >10MB) -----", path.display()),
-                tokens: 0,
             });
         }
     }
@@ -154,7 +161,6 @@ fn process_single_file(
             return Some(ProcessedFile {
                 index,
                 content: format!("----- {} (Error opening file) -----", path.display()),
-                tokens: 0,
             });
         }
     };
@@ -167,7 +173,6 @@ fn process_single_file(
             return Some(ProcessedFile {
                 index,
                 content: format!("----- {} (Error reading prelude) -----", path.display()),
-                tokens: 0,
             });
         }
     };
@@ -177,7 +182,6 @@ fn process_single_file(
         return Some(ProcessedFile {
             index,
             content: format!("----- {} (Skipped: Binary) -----", path.display()),
-            tokens: 0,
         });
     }
 
@@ -193,7 +197,6 @@ fn process_single_file(
         return Some(ProcessedFile {
             index,
             content: format!("----- {} (Error reading content) -----", path.display()),
-            tokens: 0,
         });
     }
 
@@ -213,19 +216,9 @@ fn process_single_file(
         final_output.push('\n');
     }
 
-    // Count tokens
-    let tokens = if let Some(tokenizer) = tokenizer {
-        tokenizer
-            .encode_with_special_tokens(&transformed_content)
-            .len()
-    } else {
-        0
-    };
-
     Some(ProcessedFile {
         index,
         content: final_output.trim_end().to_string(),
-        tokens,
     })
 }
 
@@ -256,6 +249,7 @@ mod tests {
             OutputDestination::File(output_path.clone()),
             &decorator,
             None,
+            true,
         )?;
 
         assert!(output_path.exists());

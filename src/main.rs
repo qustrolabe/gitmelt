@@ -64,6 +64,10 @@ struct Cli {
     #[arg(long)]
     dry: bool,
 
+    /// Disable token counting
+    #[arg(long)]
+    no_tokens: bool,
+
     /// Show detailed timing information
     #[arg(short, long)]
     timing: bool,
@@ -147,6 +151,7 @@ fn main() -> Result<()> {
         output_dest,
         content_decorator.as_ref(),
         Some(&global_decorator),
+        !cli.no_tokens,
     )?;
     let ingest_duration = ingest_start.elapsed();
 
