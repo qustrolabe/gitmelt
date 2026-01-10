@@ -1,15 +1,23 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use log::info;
 use std::process::Command;
 use tempfile::TempDir;
 
+use std::sync::OnceLock;
+
+static GIT_CHECK: OnceLock<Result<(), String>> = OnceLock::new();
+
 fn check_git_installed() -> Result<()> {
-    match Command::new("git").arg("--version").output() {
-        Ok(output) if output.status.success() => Ok(()),
-        _ => {
-            bail!("Git is not installed or not in PATH. Please install Git to clone repositories.")
-        }
-    }
+    GIT_CHECK
+        .get_or_init(|| match Command::new("git").arg("--version").output() {
+            Ok(output) if output.status.success() => Ok(()),
+            _ => Err(
+                "Git is not installed or not in PATH. Please install Git to clone repositories."
+                    .to_string(),
+            ),
+        })
+        .clone()
+        .map_err(|e| anyhow::anyhow!(e))
 }
 
 pub fn clone_repo(url: &str, branch: Option<&str>) -> Result<TempDir> {
