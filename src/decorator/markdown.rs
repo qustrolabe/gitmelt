@@ -9,7 +9,7 @@ impl ContentDecorator for MarkdownDecorator {
         // Extract extension for syntax highlighting (e.g., "rs", "toml")
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-        Some(format!("## File: {}\n```{}", path_str, ext))
+        Some(format!("## File: {path_str}\n```{ext}"))
     }
 
     fn after(&self, _path: &Path) -> Option<String> {

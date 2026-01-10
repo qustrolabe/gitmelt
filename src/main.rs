@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 use traversal::TraversalOptions;
 
-use crate::decorator::{ContentDecorator, DefaultDecorator, FileTreeDecorator, MarkdownDecorator, XmlDecorator};
+use crate::decorator::{
+    ContentDecorator, DefaultDecorator, FileTreeDecorator, MarkdownDecorator, XmlDecorator,
+};
 use crate::ingest::OutputDestination;
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -24,6 +26,7 @@ enum Preset {
 #[derive(Parser)]
 #[command(name = "gitmelt")]
 #[command(about = "Concatenates file contents into a single digest file", long_about = None)]
+#[allow(clippy::struct_excessive_bools)]
 struct Cli {
     /// Path to traverse or Git URL
     #[arg(default_value = ".")]
@@ -162,8 +165,8 @@ fn main() -> Result<()> {
     if cli.timing {
         println!("\nTiming Summary:");
         println!("----------------------------------------");
-        println!("Discovery:      {:?}", discovery_duration);
-        println!("Ingestion:      {:?}", ingest_duration);
+        println!("Discovery:      {discovery_duration:?}");
+        println!("Ingestion:      {ingest_duration:?}");
         println!("Total Runtime:  {:?}", global_start.elapsed());
         println!("----------------------------------------");
     }

@@ -71,7 +71,7 @@ pub fn ingest(
                     total_tokens += t.encode_with_special_tokens(&prologue).len();
                 }
                 if let Some(ref mut w) = writer {
-                    writeln!(w, "{}", prologue)?;
+                    writeln!(w, "{prologue}")?;
                 }
             }
 
@@ -126,7 +126,7 @@ pub fn ingest(
 
         Ok(IngestMetrics { total_tokens })
     })
-    .map_err(|e| anyhow::anyhow!("Scope error: {:?}", e))??;
+    .map_err(|e| anyhow::anyhow!("Scope error: {e:?}"))??;
 
     info!("Total estimated tokens: {}", metrics.total_tokens);
     println!("Total estimated tokens: {}", metrics.total_tokens);
@@ -140,8 +140,8 @@ fn process_single_file(
     content_decorator: &dyn ContentDecorator,
 ) -> Option<ProcessedFile> {
     // 1. Check file size
-    if let Ok(metadata) = std::fs::metadata(path) {
-        if metadata.len() > MAX_FILE_SIZE {
+    if let Ok(metadata) = std::fs::metadata(path)
+        && metadata.len() > MAX_FILE_SIZE {
             error!(
                 "Skipping large file: {} ({} bytes)",
                 path.display(),
@@ -152,7 +152,6 @@ fn process_single_file(
                 content: format!("----- {} (Skipped: >10MB) -----", path.display()),
             });
         }
-    }
 
     // 2. Check for binary content & Read
     let mut file = match File::open(path) {

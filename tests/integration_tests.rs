@@ -21,7 +21,7 @@ fn test_cli_ignores_binaries() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(f, "Important Context")?;
 
     // 3. Run gitmelt
-    let mut cmd = Command::cargo_bin("gitmelt")?;
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gitmelt"));
     cmd.arg(root.to_str().unwrap())
         .arg("--stdout")
         .arg("--no-tokens");
@@ -52,7 +52,7 @@ fn test_gitignore_logic() -> Result<(), Box<dyn std::error::Error>> {
     let mut public = File::create(root.join("public.txt"))?;
     writeln!(public, "Public info")?;
 
-    let mut cmd = Command::cargo_bin("gitmelt")?;
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gitmelt"));
     cmd.arg(root.to_str().unwrap())
         .arg("--stdout")
         .arg("--no-tokens");
@@ -79,7 +79,7 @@ fn test_file_ordering() -> Result<(), Box<dyn std::error::Error>> {
     let mut ba = File::create(root.join("b/a.txt"))?;
     writeln!(ba, "Content B/A")?;
 
-    let mut cmd = Command::cargo_bin("gitmelt")?;
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gitmelt"));
     cmd.arg(root.to_str().unwrap())
         .arg("--stdout")
         .arg("--no-tokens");
@@ -112,7 +112,7 @@ fn test_include_exclude_complexity() -> Result<(), Box<dyn std::error::Error>> {
     let mut test_rs = File::create(root.join("tests/main_test.rs"))?;
     writeln!(test_rs, "test")?;
 
-    let mut cmd = Command::cargo_bin("gitmelt")?;
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gitmelt"));
     cmd.arg(root.to_str().unwrap())
         .arg("--stdout")
         .arg("--no-tokens")

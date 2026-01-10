@@ -169,13 +169,12 @@ mod tests {
 
         let files = traverse(&options)?;
         for f in &files {
-            eprintln!("Found: {:?}", f);
+            eprintln!("Found: {f:?}");
         }
 
         assert!(
             files.iter().any(|p| p.ends_with("main.rs")),
-            "Files found: {:?}",
-            files
+            "Files found: {files:?}"
         );
         assert!(!files.iter().any(|p| p.ends_with("Cargo.lock")));
         assert!(!files.iter().any(|p| p.ends_with("test.lock")));
