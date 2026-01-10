@@ -26,6 +26,7 @@ pub struct IngestMetrics {
 struct ProcessedFile {
     index: usize,
     content: String,
+    tokens: usize,
 }
 
 pub fn ingest(
@@ -51,8 +52,7 @@ pub fn ingest(
     let (tx, rx) = bounded(32); // Buffer some results to keep cores busy
 
     let metrics = crossbeam::scope(|scope| -> Result<IngestMetrics> {
-        // Spawn writer thread
-        let rx = rx; // Move rx into the scope, but it's shared
+        let tokenizer_ref = tokenizer.as_ref();
         let writer_handle = scope.spawn(move |_| -> Result<usize> {
             let mut writer: Option<Box<dyn Write>> = match output_dest {
                 OutputDestination::File(ref path) => {
@@ -67,7 +67,7 @@ pub fn ingest(
             let mut next_index = 0;
 
             if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
-                if let Some(ref t) = tokenizer {
+                if let Some(t) = tokenizer_ref {
                     total_tokens += t.encode_with_special_tokens(&prologue).len();
                 }
                 if let Some(ref mut w) = writer {
@@ -80,9 +80,7 @@ pub fn ingest(
                 while let Some(processed) = pending.remove(&next_index) {
                     let processed: ProcessedFile = processed;
 
-                    if let Some(ref t) = tokenizer {
-                        total_tokens += t.encode_with_special_tokens(&processed.content).len();
-                    }
+                    total_tokens += processed.tokens;
 
                     if let Some(ref mut w) = writer {
                         writeln!(w, "{}", processed.content)?;
@@ -113,7 +111,9 @@ pub fn ingest(
 
         // Process files in parallel
         files.par_iter().enumerate().for_each(|(idx, path)| {
-            if let Some(processed) = process_single_file(idx, path, content_decorator) {
+            if let Some(processed) =
+                process_single_file(idx, path, content_decorator, tokenizer.as_ref())
+            {
                 let _ = tx.send(processed);
             }
         });
@@ -138,22 +138,25 @@ fn process_single_file(
     index: usize,
     path: &PathBuf,
     content_decorator: &dyn ContentDecorator,
+    tokenizer: Option<&tiktoken_rs::CoreBPE>,
 ) -> Option<ProcessedFile> {
     // 1. Check file size
     if let Ok(metadata) = std::fs::metadata(path)
-        && metadata.len() > MAX_FILE_SIZE {
-            error!(
-                "Skipping large file: {} ({} bytes)",
-                path.display(),
-                metadata.len()
-            );
-            return Some(ProcessedFile {
-                index,
-                content: format!("----- {} (Skipped: >10MB) -----", path.display()),
-            });
-        }
+        && metadata.len() > MAX_FILE_SIZE
+    {
+        error!(
+            "Skipping large file: {} ({} bytes)",
+            path.display(),
+            metadata.len()
+        );
+        return Some(ProcessedFile {
+            index,
+            content: format!("----- {} (Skipped: >10MB) -----", path.display()),
+            tokens: 0,
+        });
+    }
 
-    // 2. Check for binary content & Read
+    // 2. Read file into memory
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(e) => {
@@ -161,35 +164,10 @@ fn process_single_file(
             return Some(ProcessedFile {
                 index,
                 content: format!("----- {} (Error opening file) -----", path.display()),
+                tokens: 0,
             });
         }
     };
-
-    let mut prelude_buffer = [0u8; 1024];
-    let n = match std::io::Read::read(&mut file, &mut prelude_buffer) {
-        Ok(n) => n,
-        Err(e) => {
-            error!("Error reading prelude of {}: {e}", path.display());
-            return Some(ProcessedFile {
-                index,
-                content: format!("----- {} (Error reading prelude) -----", path.display()),
-            });
-        }
-    };
-
-    if n > 0 && content_inspector::inspect(&prelude_buffer[..n]).is_binary() {
-        warn!("Skipping binary file: {}", path.display());
-        return Some(ProcessedFile {
-            index,
-            content: format!("----- {} (Skipped: Binary) -----", path.display()),
-        });
-    }
-
-    // Reset cursor
-    if let Err(e) = std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(0)) {
-        error!("Error seeking {}: {e}", path.display());
-        return None;
-    }
 
     let mut buffer = Vec::new();
     if let Err(e) = std::io::Read::read_to_end(&mut file, &mut buffer) {
@@ -197,6 +175,18 @@ fn process_single_file(
         return Some(ProcessedFile {
             index,
             content: format!("----- {} (Error reading content) -----", path.display()),
+            tokens: 0,
+        });
+    }
+
+    // 3. Check for binary content
+    let n = buffer.len().min(1024);
+    if n > 0 && content_inspector::inspect(&buffer[..n]).is_binary() {
+        warn!("Skipping binary file: {}", path.display());
+        return Some(ProcessedFile {
+            index,
+            content: format!("----- {} (Skipped: Binary) -----", path.display()),
+            tokens: 0,
         });
     }
 
@@ -218,9 +208,15 @@ fn process_single_file(
         final_output.push('\n');
     }
 
+    let final_output = final_output.trim_end().to_string();
+    let tokens = tokenizer
+        .map(|t| t.encode_with_special_tokens(&final_output).len())
+        .unwrap_or(0);
+
     Some(ProcessedFile {
         index,
-        content: final_output.trim_end().to_string(),
+        content: final_output,
+        tokens,
     })
 }
 
