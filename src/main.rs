@@ -11,12 +11,13 @@ use std::path::PathBuf;
 use std::time::Instant;
 use traversal::TraversalOptions;
 
-use crate::decorator::{ContentDecorator, DefaultDecorator, FileTreeDecorator, XmlDecorator};
+use crate::decorator::{ContentDecorator, DefaultDecorator, FileTreeDecorator, MarkdownDecorator, XmlDecorator};
 use crate::ingest::OutputDestination;
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Preset {
     Default,
+    Markdown,
     Xml,
 }
 
@@ -137,6 +138,7 @@ fn main() -> Result<()> {
 
     let content_decorator: Box<dyn ContentDecorator> = match cli.preset {
         Preset::Default => Box::new(DefaultDecorator),
+        Preset::Markdown => Box::new(MarkdownDecorator),
         Preset::Xml => Box::new(XmlDecorator),
     };
 

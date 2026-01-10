@@ -2,10 +2,12 @@ use std::path::Path;
 
 pub mod default;
 pub mod file_tree;
+pub mod markdown;
 pub mod xml;
 
 pub use default::DefaultDecorator;
 pub use file_tree::FileTreeDecorator;
+pub use markdown::MarkdownDecorator;
 pub use xml::XmlDecorator;
 
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq)]

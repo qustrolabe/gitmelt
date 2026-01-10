@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
-use tiktoken_rs::{CoreBPE, cl100k_base};
+use tiktoken_rs::cl100k_base;
 
 pub const DIGEST_FILENAME: &str = "digest.txt";
 
@@ -62,21 +62,32 @@ pub fn ingest(
                 OutputDestination::Null => None,
             };
 
-            let mut full_content = String::new();
+            let mut total_tokens = 0;
             let mut pending = BTreeMap::new();
             let mut next_index = 0;
 
             if let Some(prologue) = global_decorator.and_then(|g| g.prologue(files)) {
-                full_content.push_str(&prologue);
-                full_content.push('\n');
+                if let Some(ref t) = tokenizer {
+                    total_tokens += t.encode_with_special_tokens(&prologue).len();
+                }
+                if let Some(ref mut w) = writer {
+                    writeln!(w, "{}", prologue)?;
+                }
             }
 
             while next_index < files.len() {
                 // Check if we already have the next segment
                 while let Some(processed) = pending.remove(&next_index) {
                     let processed: ProcessedFile = processed;
-                    full_content.push_str(&processed.content);
-                    full_content.push('\n');
+
+                    if let Some(ref t) = tokenizer {
+                        total_tokens += t.encode_with_special_tokens(&processed.content).len();
+                    }
+
+                    if let Some(ref mut w) = writer {
+                        writeln!(w, "{}", processed.content)?;
+                    }
+
                     next_index += 1;
                 }
 
@@ -93,17 +104,7 @@ pub fn ingest(
                 }
             }
 
-            // Trim the last newline if we have content
-            let final_output = full_content.trim_end();
-
-            let total_tokens = if let Some(t) = tokenizer {
-                t.encode_with_special_tokens(final_output).len()
-            } else {
-                0
-            };
-
             if let Some(ref mut w) = writer {
-                writeln!(w, "{}", final_output)?;
                 w.flush()?;
             }
 
@@ -191,14 +192,16 @@ fn process_single_file(
         return None;
     }
 
-    let mut content = String::new();
-    if let Err(e) = std::io::Read::read_to_string(&mut file, &mut content) {
+    let mut buffer = Vec::new();
+    if let Err(e) = std::io::Read::read_to_end(&mut file, &mut buffer) {
         error!("Error reading {}: {e}", path.display());
         return Some(ProcessedFile {
             index,
             content: format!("----- {} (Error reading content) -----", path.display()),
         });
     }
+
+    let content = String::from_utf8_lossy(&buffer).to_string();
 
     // Apply decoration
     let mut final_output = String::new();
