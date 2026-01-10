@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -17,16 +16,17 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: gitmelt-linux
+            base_name: gitmelt-linux
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: gitmelt-windows.exe
+            base_name: gitmelt-windows
+            extension: .exe
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: gitmelt-macos-x86_64
-          - os: macos-latest
+            base_name: gitmelt-macos-x86_64
+          - os: macos-14
             target: aarch64-apple-darwin
-            artifact_name: gitmelt-macos-aarch64
+            base_name: gitmelt-macos-aarch64
 
     steps:
       - name: Checkout code
@@ -37,21 +37,30 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Prepare binary
+      - name: Prepare binary with Version Name
         shell: bash
         run: |
+          TAG=${{ github.event.release.tag_name }}
+          NEW_NAME="${{ matrix.base_name }}-$TAG${{ matrix.extension }}"
+
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv target/${{ matrix.target }}/release/gitmelt.exe ${{ matrix.artifact_name }}
+            BINARY_PATH="target/${{ matrix.target }}/release/gitmelt.exe"
           else
-            mv target/${{ matrix.target }}/release/gitmelt ${{ matrix.artifact_name }}
+            BINARY_PATH="target/${{ matrix.target }}/release/gitmelt"
           fi
+
+          mv "$BINARY_PATH" "$NEW_NAME"
+          echo "FINAL_BINARY_NAME=$NEW_NAME" >> $GITHUB_ENV
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: ${{ env.FINAL_BINARY_NAME }}
