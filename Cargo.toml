@@ -1,6 +1,6 @@
 [package]
 name = "gitmelt"
-version = "0.4.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["qustrolabe <qustrolabe@gmail.com>"]
 description = "a tool to turn repository into single file text digest to conveniently feed into LLM"
