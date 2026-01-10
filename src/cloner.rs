@@ -1,9 +1,19 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use log::info;
 use std::process::Command;
 use tempfile::TempDir;
 
+fn check_git_installed() -> Result<()> {
+    match Command::new("git").arg("--version").output() {
+        Ok(output) if output.status.success() => Ok(()),
+        _ => {
+            bail!("Git is not installed or not in PATH. Please install Git to clone repositories.")
+        }
+    }
+}
+
 pub fn clone_repo(url: &str, branch: Option<&str>) -> Result<TempDir> {
+    check_git_installed()?;
     let temp_dir = TempDir::new()?;
     let target_path = temp_dir.path();
 

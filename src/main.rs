@@ -8,20 +8,25 @@ use clap::Parser;
 use log::{LevelFilter, info};
 use std::env;
 use std::path::PathBuf;
+use std::time::Instant;
 use traversal::TraversalOptions;
 
-use crate::decorator::{ContentDecorator, DefaultDecorator, FileTreeDecorator, XmlDecorator};
+use crate::decorator::{
+    ContentDecorator, DefaultDecorator, FileTreeDecorator, MarkdownDecorator, XmlDecorator,
+};
 use crate::ingest::OutputDestination;
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum Preset {
     Default,
+    Markdown,
     Xml,
 }
 
 #[derive(Parser)]
 #[command(name = "gitmelt")]
 #[command(about = "Concatenates file contents into a single digest file", long_about = None)]
+#[allow(clippy::struct_excessive_bools)]
 struct Cli {
     /// Path to traverse or Git URL
     #[arg(default_value = ".")]
@@ -62,6 +67,14 @@ struct Cli {
     /// Dry run (only token estimation)
     #[arg(long)]
     dry: bool,
+
+    /// Disable token counting
+    #[arg(long)]
+    no_tokens: bool,
+
+    /// Show detailed timing information
+    #[arg(short, long)]
+    timing: bool,
 }
 
 fn init_logger(verbose: bool) {
@@ -79,6 +92,7 @@ fn init_logger(verbose: bool) {
 }
 
 fn main() -> Result<()> {
+    let global_start = Instant::now();
     let cli = Cli::parse();
 
     init_logger(cli.verbose);
@@ -102,7 +116,9 @@ fn main() -> Result<()> {
     };
 
     info!("Traversing files in {}", options.root.display());
+    let discovery_start = Instant::now();
     let files = traversal::traverse(&options)?;
+    let discovery_duration = discovery_start.elapsed();
 
     info!("Found {} files", files.len());
     if files.is_empty() {
@@ -125,6 +141,7 @@ fn main() -> Result<()> {
 
     let content_decorator: Box<dyn ContentDecorator> = match cli.preset {
         Preset::Default => Box::new(DefaultDecorator),
+        Preset::Markdown => Box::new(MarkdownDecorator),
         Preset::Xml => Box::new(XmlDecorator),
     };
 
@@ -133,14 +150,26 @@ fn main() -> Result<()> {
         mode: cli.prologue,
     };
 
-    ingest::ingest(
+    let ingest_start = Instant::now();
+    let _ingest_metrics = ingest::ingest(
         &files,
         output_dest,
         content_decorator.as_ref(),
         Some(&global_decorator),
+        !cli.no_tokens,
     )?;
+    let ingest_duration = ingest_start.elapsed();
 
     info!("Done!");
+
+    if cli.timing {
+        println!("\nTiming Summary:");
+        println!("----------------------------------------");
+        println!("Discovery:      {discovery_duration:?}");
+        println!("Ingestion:      {ingest_duration:?}");
+        println!("Total Runtime:  {:?}", global_start.elapsed());
+        println!("----------------------------------------");
+    }
 
     Ok(())
 }

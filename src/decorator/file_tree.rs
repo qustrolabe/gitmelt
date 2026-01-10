@@ -74,7 +74,7 @@ fn print_tree(node: &TreeNode, prefix: &str, output: &mut String) {
             prefix,
             connector,
             name,
-            if !child.is_file { "/" } else { "" }
+            if child.is_file { "" } else { "/" }
         );
 
         if !child.children.is_empty() {
