@@ -15,6 +15,6 @@ and `.toml` files in the current directory and its subdirectories
 ## Build
 
 ```bash
-cargo build --relase
+cargo build --release
 cargo install --path .
 ```
