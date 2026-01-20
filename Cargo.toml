@@ -1,13 +1,14 @@
 [package]
 name = "gitmelt"
-version = "0.5.1"
+version = "0.5.3"
 edition = "2024"
+rust-version = "1.92.0"
 authors = ["qustrolabe <qustrolabe@gmail.com>"]
 description = "a tool to turn repository into single file text digest to conveniently feed into LLM"
 license = "MIT"
 repository = "https://github.com/qustrolabe/gitmelt"
 readme = "README.md"
-keywords = ["git", "llm", "digest", "context", "cli", "tool"]
+keywords = ["git", "llm", "digest", "cli", "tool"]
 categories = ["command-line-utilities"]
 
 [dependencies]
